@@ -2,18 +2,20 @@
 
 namespace Tests\Feature;
 
-// use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
 class ExampleTest extends TestCase
 {
-    /**
-     * A basic test example.
-     */
-    public function test_the_application_returns_a_successful_response(): void
+    public function test_public_welcome_page_presents_gantian(): void
     {
-        $response = $this->get('/');
-
-        $response->assertStatus(200);
+        $this->get('/')
+            ->assertOk()
+            ->assertSee('Gantian')
+            ->assertSee('Enterprise rental management')
+            ->assertSee('Sistem peminjaman barang')
+            ->assertSee('Customer')
+            ->assertSee('Staff')
+            ->assertSee('Admin/Owner')
+            ->assertDontSee('Laravel has wonderful documentation');
     }
 }
