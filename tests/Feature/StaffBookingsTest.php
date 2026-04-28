@@ -1,0 +1,141 @@
+<?php
+
+namespace Tests\Feature;
+
+use App\Models\Booking;
+use App\Models\Fine;
+use App\Models\Item;
+use App\Models\User;
+use Illuminate\Foundation\Testing\RefreshDatabase;
+use Livewire\Volt\Volt;
+use Tests\TestCase;
+
+class StaffBookingsTest extends TestCase
+{
+    use RefreshDatabase;
+
+    public function test_staff_bookings_page_renders_bookings_with_related_details(): void
+    {
+        $staff = User::factory()->staff()->create();
+        $customer = User::factory()->customer()->create(['name' => 'Ayu Customer']);
+        $item = Item::factory()->create(['name' => 'Camera Kit']);
+        $booking = Booking::factory()
+            ->approved()
+            ->for($customer)
+            ->for($item)
+            ->create(['total_price' => '125.50']);
+
+        Fine::factory()->unpaid()->for($booking)->create([
+            'fine_amount' => '12.00',
+            'reason' => 'Late return',
+        ]);
+
+        $this->actingAs($staff)
+            ->get(route('staff.bookings'))
+            ->assertOk()
+            ->assertSeeVolt('pages.staff.bookings')
+            ->assertSee('Ayu Customer')
+            ->assertSee('Camera Kit')
+            ->assertSee('125.50')
+            ->assertSee('12.00');
+    }
+
+    public function test_staff_can_move_bookings_through_operational_statuses(): void
+    {
+        $this->actingAs(User::factory()->staff()->create());
+
+        $pending = Booking::factory()->pending()->create();
+        $approved = Booking::factory()->approved()->create();
+        $active = Booking::factory()->active()->create();
+
+        Volt::test('pages.staff.bookings')
+            ->call('approve', $pending->id)
+            ->assertSet('success', 'Booking approved.')
+            ->call('checkout', $approved->id)
+            ->assertSet('success', 'Booking checked out.')
+            ->call('checkin', $active->id)
+            ->assertSet('success', 'Booking checked in.');
+
+        $this->assertSame(Booking::STATUS_APPROVED, $pending->fresh()->status);
+        $this->assertSame(Booking::STATUS_ACTIVE, $approved->fresh()->status);
+        $this->assertSame(Booking::STATUS_COMPLETED, $active->fresh()->status);
+    }
+
+    public function test_staff_approval_surfaces_availability_errors(): void
+    {
+        $this->actingAs(User::factory()->staff()->create());
+
+        $item = Item::factory()->available()->create(['stock' => 1]);
+
+        Booking::factory()
+            ->approved()
+            ->for($item)
+            ->create([
+                'start_date' => '2026-05-01',
+                'end_date' => '2026-05-03',
+            ]);
+
+        $pending = Booking::factory()
+            ->pending()
+            ->for($item)
+            ->create([
+                'start_date' => '2026-05-02',
+                'end_date' => '2026-05-04',
+            ]);
+
+        Volt::test('pages.staff.bookings')
+            ->call('approve', $pending->id)
+            ->assertSet('error', 'Cannot approve booking because this item is fully booked for the selected dates.');
+
+        $this->assertSame(Booking::STATUS_PENDING, $pending->fresh()->status);
+    }
+
+    public function test_staff_can_cancel_pending_and_approved_bookings(): void
+    {
+        $this->actingAs(User::factory()->staff()->create());
+
+        $pending = Booking::factory()->pending()->create();
+        $approved = Booking::factory()->approved()->create();
+
+        Volt::test('pages.staff.bookings')
+            ->call('cancel', $pending->id)
+            ->assertSet('success', 'Booking cancelled.')
+            ->call('cancel', $approved->id)
+            ->assertSet('success', 'Booking cancelled.');
+
+        $this->assertSame(Booking::STATUS_CANCELLED, $pending->fresh()->status);
+        $this->assertSame(Booking::STATUS_CANCELLED, $approved->fresh()->status);
+    }
+
+    public function test_staff_can_issue_fines_for_active_or_completed_bookings(): void
+    {
+        $this->actingAs(User::factory()->staff()->create());
+
+        $booking = Booking::factory()->active()->create();
+
+        Volt::test('pages.staff.bookings')
+            ->set("fineAmounts.$booking->id", '35.25')
+            ->set("fineReasons.$booking->id", 'Returned with damaged lens cap')
+            ->call('issueFine', $booking->id)
+            ->assertSet('success', 'Fine issued.')
+            ->assertHasNoErrors();
+
+        $this->assertDatabaseHas('fines', [
+            'booking_id' => $booking->id,
+            'fine_amount' => '35.25',
+            'reason' => 'Returned with damaged lens cap',
+            'status' => Fine::STATUS_UNPAID,
+        ]);
+    }
+
+    public function test_invalid_lifecycle_action_surfaces_short_error_feedback(): void
+    {
+        $this->actingAs(User::factory()->staff()->create());
+
+        $booking = Booking::factory()->completed()->create();
+
+        Volt::test('pages.staff.bookings')
+            ->call('cancel', $booking->id)
+            ->assertSet('error', 'Cannot cancel booking from status "completed".');
+    }
+}
