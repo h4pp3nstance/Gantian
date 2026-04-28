@@ -154,6 +154,37 @@ class StaffBookingsTest extends TestCase
         ]);
     }
 
+    public function test_staff_can_settle_unpaid_fines(): void
+    {
+        $this->actingAs(User::factory()->staff()->create());
+
+        $booking = Booking::factory()->completed()->create();
+        $paidFine = Fine::factory()->unpaid()->for($booking)->create();
+        $waivedFine = Fine::factory()->unpaid()->for($booking)->create();
+
+        Volt::test('pages.staff.bookings')
+            ->call('markFinePaid', $paidFine->id)
+            ->assertSet('success', 'Fine marked paid.')
+            ->call('waiveFine', $waivedFine->id)
+            ->assertSet('success', 'Fine waived.');
+
+        $this->assertSame(Fine::STATUS_PAID, $paidFine->fresh()->status);
+        $this->assertSame(Fine::STATUS_WAIVED, $waivedFine->fresh()->status);
+    }
+
+    public function test_settled_fines_cannot_be_transitioned_again(): void
+    {
+        $this->actingAs(User::factory()->staff()->create());
+
+        $fine = Fine::factory()->paid()->create();
+
+        Volt::test('pages.staff.bookings')
+            ->call('waiveFine', $fine->id)
+            ->assertSet('error', 'Cannot waive fine from status "paid".');
+
+        $this->assertSame(Fine::STATUS_PAID, $fine->fresh()->status);
+    }
+
     public function test_invalid_lifecycle_action_surfaces_short_error_feedback(): void
     {
         $this->actingAs(User::factory()->staff()->create());

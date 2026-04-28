@@ -2,6 +2,7 @@
 
 use App\Models\Booking;
 use App\Models\BookingInspection;
+use App\Models\Fine;
 use App\Services\BookingLifecycleService;
 use App\Services\FineAssessmentService;
 use Illuminate\Support\Facades\Auth;
@@ -153,6 +154,28 @@ new #[Layout('layouts.app')] class extends Component
         }
     }
 
+    public function markFinePaid(int $fineId): void
+    {
+        Gate::authorize('issue-fines');
+
+        $this->settleFine(
+            $fineId,
+            fn (FineAssessmentService $service, Fine $fine) => $service->markPaid($fine),
+            'Fine marked paid.'
+        );
+    }
+
+    public function waiveFine(int $fineId): void
+    {
+        Gate::authorize('issue-fines');
+
+        $this->settleFine(
+            $fineId,
+            fn (FineAssessmentService $service, Fine $fine) => $service->waive($fine),
+            'Fine waived.'
+        );
+    }
+
     public function fineTotal(Booking $booking): string
     {
         return $this->money($booking->fines->sum('fine_amount'));
@@ -172,6 +195,15 @@ new #[Layout('layouts.app')] class extends Component
             Booking::STATUS_COMPLETED => 'bg-slate-100 text-slate-700 ring-slate-600/20',
             Booking::STATUS_CANCELLED => 'bg-rose-50 text-rose-800 ring-rose-600/20',
             default => 'bg-gray-100 text-gray-700 ring-gray-600/20',
+        };
+    }
+
+    public function fineStatusClasses(string $status): string
+    {
+        return match ($status) {
+            Fine::STATUS_PAID => 'border-emerald-200 bg-emerald-50 text-emerald-700',
+            Fine::STATUS_WAIVED => 'border-slate-200 bg-slate-100 text-slate-600',
+            default => 'border-rose-200 bg-rose-50 text-rose-700',
         };
     }
 
@@ -211,9 +243,26 @@ new #[Layout('layouts.app')] class extends Component
         }
     }
 
+    private function settleFine(int $fineId, \Closure $action, string $message): void
+    {
+        $this->resetMessages();
+
+        try {
+            $action(app(FineAssessmentService::class), $this->fine($fineId));
+            $this->success = $message;
+        } catch (\DomainException | \InvalidArgumentException $exception) {
+            $this->error = $exception->getMessage();
+        }
+    }
+
     private function booking(int $bookingId): Booking
     {
         return Booking::query()->with(['user', 'item', 'fines', 'inspection'])->findOrFail($bookingId);
+    }
+
+    private function fine(int $fineId): Fine
+    {
+        return Fine::query()->findOrFail($fineId);
     }
 
     private function resetMessages(): void
@@ -363,6 +412,30 @@ new #[Layout('layouts.app')] class extends Component
                                             </div>
                                             <button type="submit" class="mt-5 rounded-md bg-white px-3 py-2 text-xs font-semibold text-gray-800 shadow-sm ring-1 ring-inset ring-gray-300 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-gray-900 focus:ring-offset-2 md:mt-6">Issue fine</button>
                                         </form>
+
+                                        @if ($booking->fines->isNotEmpty())
+                                            <div class="mt-4 space-y-2">
+                                                @foreach ($booking->fines as $fine)
+                                                    <div wire:key="fine-settlement-row-{{ $fine->id }}" class="flex flex-col gap-3 rounded-md border border-gray-200 bg-white p-3 md:flex-row md:items-center md:justify-between">
+                                                        <div class="min-w-0">
+                                                            <div class="flex flex-wrap items-center gap-2">
+                                                                <span class="text-sm font-semibold text-gray-950">{{ $this->money($fine->fine_amount) }}</span>
+                                                                <span class="rounded-full border px-2 py-0.5 text-xs font-medium {{ $this->fineStatusClasses($fine->status) }}">{{ ucfirst($fine->status) }}</span>
+                                                            </div>
+                                                            <p class="mt-1 line-clamp-1 text-sm text-gray-600">{{ $fine->reason }}</p>
+                                                        </div>
+                                                        @if ($fine->status === Fine::STATUS_UNPAID)
+                                                            <div class="flex flex-wrap gap-2 md:justify-end">
+                                                                <button type="button" wire:click="markFinePaid({{ $fine->id }})" class="rounded-md bg-gray-900 px-3 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-gray-900 focus:ring-offset-2">Mark paid</button>
+                                                                <button type="button" wire:click="waiveFine({{ $fine->id }})" class="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-xs font-semibold text-gray-700 shadow-sm hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-gray-900 focus:ring-offset-2">Waive</button>
+                                                            </div>
+                                                        @else
+                                                            <span class="text-xs text-gray-500">Settled</span>
+                                                        @endif
+                                                    </div>
+                                                @endforeach
+                                            </div>
+                                        @endif
                                     </td>
                                 </tr>
                             @endif
@@ -466,6 +539,26 @@ new #[Layout('layouts.app')] class extends Component
                                 </div>
                                 <button type="submit" class="mt-3 rounded-md bg-white px-3 py-2 text-xs font-semibold text-gray-800 shadow-sm ring-1 ring-inset ring-gray-300 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-gray-900 focus:ring-offset-2">Issue fine</button>
                             </form>
+
+                            @if ($booking->fines->isNotEmpty())
+                                <div class="mt-3 space-y-2">
+                                    @foreach ($booking->fines as $fine)
+                                        <div wire:key="fine-settlement-card-{{ $fine->id }}" class="rounded-md border border-gray-200 bg-white p-3">
+                                            <div class="flex flex-wrap items-center justify-between gap-2">
+                                                <span class="text-sm font-semibold text-gray-950">{{ $this->money($fine->fine_amount) }}</span>
+                                                <span class="rounded-full border px-2 py-0.5 text-xs font-medium {{ $this->fineStatusClasses($fine->status) }}">{{ ucfirst($fine->status) }}</span>
+                                            </div>
+                                            <p class="mt-1 text-sm text-gray-600">{{ $fine->reason }}</p>
+                                            @if ($fine->status === Fine::STATUS_UNPAID)
+                                                <div class="mt-3 flex flex-wrap gap-2">
+                                                    <button type="button" wire:click="markFinePaid({{ $fine->id }})" class="rounded-md bg-gray-900 px-3 py-2 text-xs font-semibold text-white shadow-sm hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-gray-900 focus:ring-offset-2">Mark paid</button>
+                                                    <button type="button" wire:click="waiveFine({{ $fine->id }})" class="rounded-md border border-gray-300 bg-white px-3 py-2 text-xs font-semibold text-gray-700 shadow-sm hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-gray-900 focus:ring-offset-2">Waive</button>
+                                                </div>
+                                            @endif
+                                        </div>
+                                    @endforeach
+                                </div>
+                            @endif
                         @endif
                     </section>
                 @empty
