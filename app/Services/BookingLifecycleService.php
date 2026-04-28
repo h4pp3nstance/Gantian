@@ -3,9 +3,12 @@
 namespace App\Services;
 
 use App\Models\Booking;
+use App\Models\BookingInspection;
 use App\Models\Item;
+use App\Models\User;
 use DomainException;
 use Illuminate\Support\Facades\DB;
+use InvalidArgumentException;
 
 class BookingLifecycleService
 {
@@ -45,9 +48,40 @@ class BookingLifecycleService
         return $this->transition($booking, [Booking::STATUS_APPROVED], Booking::STATUS_ACTIVE, 'checkout');
     }
 
-    public function checkin(Booking $booking): Booking
+    /**
+     * @param  array{condition_status?: string, notes?: string|null}  $inspection
+     */
+    public function checkin(Booking $booking, User $inspectedBy, array $inspection): Booking
     {
-        return $this->transition($booking, [Booking::STATUS_ACTIVE], Booking::STATUS_COMPLETED, 'check in');
+        $conditionStatus = (string) ($inspection['condition_status'] ?? '');
+        $notes = trim((string) ($inspection['notes'] ?? ''));
+
+        if (! in_array($conditionStatus, BookingInspection::CONDITION_STATUSES, true)) {
+            throw new InvalidArgumentException('Inspection condition is invalid.');
+        }
+
+        if ($conditionStatus !== BookingInspection::CONDITION_GOOD && $notes === '') {
+            throw new InvalidArgumentException('Inspection notes are required unless condition is good.');
+        }
+
+        return $this->transition(
+            $booking,
+            [Booking::STATUS_ACTIVE],
+            Booking::STATUS_COMPLETED,
+            'check in',
+            function (Booking $lockedBooking) use ($conditionStatus, $inspectedBy, $notes): void {
+                if ($lockedBooking->inspection()->exists()) {
+                    throw new DomainException('Booking has already been inspected.');
+                }
+
+                $lockedBooking->inspection()->create([
+                    'inspected_by' => $inspectedBy->id,
+                    'condition_status' => $conditionStatus,
+                    'notes' => $notes === '' ? null : $notes,
+                    'inspected_at' => now(),
+                ]);
+            }
+        );
     }
 
     public function cancel(Booking $booking): Booking

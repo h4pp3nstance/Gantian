@@ -8,6 +8,7 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 
 #[Fillable(['user_id', 'item_id', 'start_date', 'end_date', 'total_price', 'status'])]
 class Booking extends Model
@@ -55,6 +56,14 @@ class Booking extends Model
     public function fines(): HasMany
     {
         return $this->hasMany(Fine::class);
+    }
+
+    /**
+     * @return HasOne<BookingInspection, $this>
+     */
+    public function inspection(): HasOne
+    {
+        return $this->hasOne(BookingInspection::class);
     }
 
     /**

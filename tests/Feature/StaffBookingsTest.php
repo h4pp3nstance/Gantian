@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Models\Booking;
+use App\Models\BookingInspection;
 use App\Models\Fine;
 use App\Models\Item;
 use App\Models\User;
@@ -53,12 +54,37 @@ class StaffBookingsTest extends TestCase
             ->assertSet('success', 'Booking approved.')
             ->call('checkout', $approved->id)
             ->assertSet('success', 'Booking checked out.')
+            ->set("inspectionStatuses.$active->id", BookingInspection::CONDITION_DAMAGED)
+            ->set("inspectionNotes.$active->id", 'Lens cap returned cracked')
             ->call('checkin', $active->id)
-            ->assertSet('success', 'Booking checked in.');
+            ->assertSet('success', 'Booking checked in.')
+            ->assertHasNoErrors();
 
         $this->assertSame(Booking::STATUS_APPROVED, $pending->fresh()->status);
         $this->assertSame(Booking::STATUS_ACTIVE, $approved->fresh()->status);
         $this->assertSame(Booking::STATUS_COMPLETED, $active->fresh()->status);
+        $this->assertDatabaseHas('booking_inspections', [
+            'booking_id' => $active->id,
+            'condition_status' => BookingInspection::CONDITION_DAMAGED,
+            'notes' => 'Lens cap returned cracked',
+        ]);
+    }
+
+    public function test_staff_cannot_check_in_non_good_condition_without_notes(): void
+    {
+        $this->actingAs(User::factory()->staff()->create());
+
+        $booking = Booking::factory()->active()->create();
+
+        Volt::test('pages.staff.bookings')
+            ->set("inspectionStatuses.$booking->id", BookingInspection::CONDITION_DAMAGED)
+            ->call('checkin', $booking->id)
+            ->assertHasErrors(["inspectionNotes.$booking->id"]);
+
+        $this->assertSame(Booking::STATUS_ACTIVE, $booking->fresh()->status);
+        $this->assertDatabaseMissing('booking_inspections', [
+            'booking_id' => $booking->id,
+        ]);
     }
 
     public function test_staff_approval_surfaces_availability_errors(): void

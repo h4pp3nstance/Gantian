@@ -1,10 +1,13 @@
 <?php
 
 use App\Models\Booking;
+use App\Models\BookingInspection;
 use App\Services\BookingLifecycleService;
 use App\Services\FineAssessmentService;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Str;
+use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 use Livewire\Attributes\Layout;
 use Livewire\Volt\Component;
@@ -17,6 +20,12 @@ new #[Layout('layouts.app')] class extends Component
     /** @var array<int, string> */
     public array $fineReasons = [];
 
+    /** @var array<int, string> */
+    public array $inspectionStatuses = [];
+
+    /** @var array<int, string> */
+    public array $inspectionNotes = [];
+
     public ?string $success = null;
 
     public ?string $error = null;
@@ -25,7 +34,7 @@ new #[Layout('layouts.app')] class extends Component
     {
         return [
             'bookings' => Booking::query()
-                ->with(['user', 'item', 'fines'])
+                ->with(['user', 'item', 'fines', 'inspection.inspector'])
                 ->latest()
                 ->get(),
         ];
@@ -57,11 +66,45 @@ new #[Layout('layouts.app')] class extends Component
     {
         Gate::authorize('process-checkin');
 
-        $this->runLifecycleAction(
-            $bookingId,
-            fn (BookingLifecycleService $service, Booking $booking) => $service->checkin($booking),
-            'Booking checked in.'
-        );
+        $statusField = "inspectionStatuses.$bookingId";
+        $notesField = "inspectionNotes.$bookingId";
+
+        $this->inspectionStatuses[$bookingId] ??= BookingInspection::CONDITION_GOOD;
+        $conditionStatus = $this->inspectionStatuses[$bookingId];
+
+        $this->resetMessages();
+        $this->validate([
+            $statusField => ['required', Rule::in(BookingInspection::CONDITION_STATUSES)],
+            $notesField => [
+                Rule::requiredIf($conditionStatus !== BookingInspection::CONDITION_GOOD),
+                'nullable',
+                'string',
+                'max:1000',
+            ],
+        ], [
+            "$statusField.required" => 'Inspection condition is required.',
+            "$statusField.in" => 'Inspection condition is invalid.',
+            "$notesField.required" => 'Inspection notes are required unless condition is good.',
+            "$notesField.max" => 'Inspection notes must be 1000 characters or fewer.',
+        ]);
+
+        try {
+            app(BookingLifecycleService::class)->checkin(
+                $this->booking($bookingId),
+                Auth::user(),
+                [
+                    'condition_status' => $conditionStatus,
+                    'notes' => $this->inspectionNotes[$bookingId] ?? '',
+                ]
+            );
+
+            unset($this->inspectionStatuses[$bookingId], $this->inspectionNotes[$bookingId]);
+            $this->success = 'Booking checked in.';
+        } catch (\DomainException | \InvalidArgumentException $exception) {
+            $this->error = $exception->getMessage();
+        } catch (ValidationException $exception) {
+            throw $exception;
+        }
     }
 
     public function cancel(int $bookingId): void
@@ -132,6 +175,30 @@ new #[Layout('layouts.app')] class extends Component
         };
     }
 
+    public function conditionLabel(string $status): string
+    {
+        return match ($status) {
+            BookingInspection::CONDITION_GOOD => 'Good',
+            BookingInspection::CONDITION_DAMAGED => 'Damaged',
+            BookingInspection::CONDITION_MISSING_ACCESSORY => 'Missing accessory',
+            BookingInspection::CONDITION_LATE_RETURN => 'Late return',
+            default => str($status)->replace('_', ' ')->title()->toString(),
+        };
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    public function conditionOptions(): array
+    {
+        return [
+            BookingInspection::CONDITION_GOOD => 'Good',
+            BookingInspection::CONDITION_DAMAGED => 'Damaged',
+            BookingInspection::CONDITION_MISSING_ACCESSORY => 'Missing accessory',
+            BookingInspection::CONDITION_LATE_RETURN => 'Late return',
+        ];
+    }
+
     private function runLifecycleAction(int $bookingId, \Closure $action, string $message): void
     {
         $this->resetMessages();
@@ -146,7 +213,7 @@ new #[Layout('layouts.app')] class extends Component
 
     private function booking(int $bookingId): Booking
     {
-        return Booking::query()->with(['user', 'item', 'fines'])->findOrFail($bookingId);
+        return Booking::query()->with(['user', 'item', 'fines', 'inspection'])->findOrFail($bookingId);
     }
 
     private function resetMessages(): void
@@ -238,13 +305,48 @@ new #[Layout('layouts.app')] class extends Component
                                             <button type="button" wire:click="checkout({{ $booking->id }})" class="rounded-md bg-gray-900 px-3 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-gray-900 focus:ring-offset-2">Checkout</button>
                                             <button type="button" wire:click="cancel({{ $booking->id }})" class="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-xs font-semibold text-gray-700 shadow-sm hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-gray-900 focus:ring-offset-2">Cancel</button>
                                         @elseif ($booking->status === Booking::STATUS_ACTIVE)
-                                            <button type="button" wire:click="checkin({{ $booking->id }})" class="rounded-md bg-gray-900 px-3 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-gray-900 focus:ring-offset-2">Check in</button>
+                                            <span class="text-xs text-gray-500">Complete inspection below</span>
                                         @else
                                             <span class="text-xs text-gray-500">No status action</span>
                                         @endif
                                     </div>
                                 </td>
                             </tr>
+                            @if ($booking->status === Booking::STATUS_ACTIVE)
+                                <tr wire:key="inspection-row-{{ $booking->id }}" class="bg-slate-50/80">
+                                    <td colspan="7" class="px-4 py-3">
+                                        <form wire:submit="checkin({{ $booking->id }})" class="grid gap-3 md:grid-cols-[12rem_1fr_auto] md:items-start">
+                                            <div>
+                                                <label for="inspection-status-{{ $booking->id }}" class="block text-xs font-semibold uppercase tracking-wide text-gray-600">Condition</label>
+                                                <select id="inspection-status-{{ $booking->id }}" wire:model="inspectionStatuses.{{ $booking->id }}" class="mt-1 block w-full rounded-md border-gray-300 text-sm shadow-sm focus:border-gray-900 focus:ring-gray-900" aria-describedby="inspection-status-error-{{ $booking->id }}">
+                                                    @foreach ($this->conditionOptions() as $value => $label)
+                                                        <option value="{{ $value }}">{{ $label }}</option>
+                                                    @endforeach
+                                                </select>
+                                                <x-input-error id="inspection-status-error-{{ $booking->id }}" :messages="$errors->get('inspectionStatuses.'.$booking->id)" class="mt-1" />
+                                            </div>
+                                            <div>
+                                                <label for="inspection-notes-{{ $booking->id }}" class="block text-xs font-semibold uppercase tracking-wide text-gray-600">Inspection notes</label>
+                                                <input id="inspection-notes-{{ $booking->id }}" type="text" wire:model="inspectionNotes.{{ $booking->id }}" class="mt-1 block w-full rounded-md border-gray-300 text-sm shadow-sm focus:border-gray-900 focus:ring-gray-900" placeholder="Required for damaged, missing accessory, or late return" aria-describedby="inspection-notes-error-{{ $booking->id }}">
+                                                <x-input-error id="inspection-notes-error-{{ $booking->id }}" :messages="$errors->get('inspectionNotes.'.$booking->id)" class="mt-1" />
+                                            </div>
+                                            <button type="submit" class="mt-5 rounded-md bg-gray-900 px-3 py-2 text-xs font-semibold text-white shadow-sm hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-gray-900 focus:ring-offset-2 md:mt-6">Complete check-in</button>
+                                        </form>
+                                    </td>
+                                </tr>
+                            @elseif ($booking->status === Booking::STATUS_COMPLETED && $booking->inspection !== null)
+                                <tr wire:key="inspection-summary-row-{{ $booking->id }}" class="bg-slate-50/80">
+                                    <td colspan="7" class="px-4 py-3 text-sm text-gray-700">
+                                        <span class="font-semibold text-gray-950">Inspection:</span>
+                                        {{ $this->conditionLabel($booking->inspection->condition_status) }}
+                                        by {{ $booking->inspection->inspector->name }}
+                                        on {{ $booking->inspection->inspected_at->format('M j, Y H:i') }}
+                                        @if ($booking->inspection->notes)
+                                            <span class="text-gray-500">- {{ $booking->inspection->notes }}</span>
+                                        @endif
+                                    </td>
+                                </tr>
+                            @endif
                             @if (in_array($booking->status, [Booking::STATUS_ACTIVE, Booking::STATUS_COMPLETED], true))
                                 <tr wire:key="fine-row-{{ $booking->id }}" class="bg-gray-50/70">
                                     <td colspan="7" class="px-4 py-3">
@@ -314,9 +416,39 @@ new #[Layout('layouts.app')] class extends Component
                                 <button type="button" wire:click="checkout({{ $booking->id }})" class="rounded-md bg-gray-900 px-3 py-2 text-xs font-semibold text-white shadow-sm hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-gray-900 focus:ring-offset-2">Checkout</button>
                                 <button type="button" wire:click="cancel({{ $booking->id }})" class="rounded-md border border-gray-300 bg-white px-3 py-2 text-xs font-semibold text-gray-700 shadow-sm hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-gray-900 focus:ring-offset-2">Cancel</button>
                             @elseif ($booking->status === Booking::STATUS_ACTIVE)
-                                <button type="button" wire:click="checkin({{ $booking->id }})" class="rounded-md bg-gray-900 px-3 py-2 text-xs font-semibold text-white shadow-sm hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-gray-900 focus:ring-offset-2">Check in</button>
+                                <span class="text-xs text-gray-500">Complete inspection below</span>
                             @endif
                         </div>
+
+                        @if ($booking->status === Booking::STATUS_ACTIVE)
+                            <form wire:submit="checkin({{ $booking->id }})" class="mt-4 rounded-md border border-gray-200 bg-gray-50 p-3">
+                                <div class="grid gap-3 sm:grid-cols-2">
+                                    <div>
+                                        <label for="inspection-status-mobile-{{ $booking->id }}" class="block text-xs font-semibold uppercase tracking-wide text-gray-600">Condition</label>
+                                        <select id="inspection-status-mobile-{{ $booking->id }}" wire:model="inspectionStatuses.{{ $booking->id }}" class="mt-1 block w-full rounded-md border-gray-300 text-sm shadow-sm focus:border-gray-900 focus:ring-gray-900">
+                                            @foreach ($this->conditionOptions() as $value => $label)
+                                                <option value="{{ $value }}">{{ $label }}</option>
+                                            @endforeach
+                                        </select>
+                                        <x-input-error :messages="$errors->get('inspectionStatuses.'.$booking->id)" class="mt-1" />
+                                    </div>
+                                    <div>
+                                        <label for="inspection-notes-mobile-{{ $booking->id }}" class="block text-xs font-semibold uppercase tracking-wide text-gray-600">Inspection notes</label>
+                                        <input id="inspection-notes-mobile-{{ $booking->id }}" type="text" wire:model="inspectionNotes.{{ $booking->id }}" class="mt-1 block w-full rounded-md border-gray-300 text-sm shadow-sm focus:border-gray-900 focus:ring-gray-900" placeholder="Required unless condition is good">
+                                        <x-input-error :messages="$errors->get('inspectionNotes.'.$booking->id)" class="mt-1" />
+                                    </div>
+                                </div>
+                                <button type="submit" class="mt-3 rounded-md bg-gray-900 px-3 py-2 text-xs font-semibold text-white shadow-sm hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-gray-900 focus:ring-offset-2">Complete check-in</button>
+                            </form>
+                        @elseif ($booking->status === Booking::STATUS_COMPLETED && $booking->inspection !== null)
+                            <div class="mt-4 rounded-md border border-gray-200 bg-gray-50 p-3 text-sm text-gray-700">
+                                <span class="font-semibold text-gray-950">Inspection:</span>
+                                {{ $this->conditionLabel($booking->inspection->condition_status) }}
+                                @if ($booking->inspection->notes)
+                                    <span class="block text-gray-500">{{ $booking->inspection->notes }}</span>
+                                @endif
+                            </div>
+                        @endif
 
                         @if (in_array($booking->status, [Booking::STATUS_ACTIVE, Booking::STATUS_COMPLETED], true))
                             <form wire:submit="issueFine({{ $booking->id }})" class="mt-4 rounded-md border border-gray-200 bg-gray-50 p-3">

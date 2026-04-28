@@ -74,6 +74,14 @@ class User extends Authenticatable
     }
 
     /**
+     * @return HasMany<BookingInspection, $this>
+     */
+    public function bookingInspections(): HasMany
+    {
+        return $this->hasMany(BookingInspection::class, 'inspected_by');
+    }
+
+    /**
      * Get the attributes that should be cast.
      *
      * @return array<string, string>
