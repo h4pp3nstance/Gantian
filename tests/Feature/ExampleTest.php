@@ -16,6 +16,10 @@ class ExampleTest extends TestCase
             ->assertSee('Customer')
             ->assertSee('Staff')
             ->assertSee('Admin/Owner')
+            ->assertSee('Masalah rental yang disederhanakan')
+            ->assertSee('Overbooking prevention')
+            ->assertSee('Alur demo yang bisa langsung diuji')
+            ->assertSee('admin@gantian.test')
             ->assertDontSee('Laravel has wonderful documentation');
     }
 }
