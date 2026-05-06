@@ -97,8 +97,8 @@ password
 | --- | --- | --- |
 | Admin/Owner | `admin@gantian.test` | Admin items, admin reports, dan staff bookings |
 | Staff | `staff@gantian.test` | Staff bookings dan operasional rental |
-| Customer | `customer@gantian.test` | Catalog dan booking request |
-| Customer | `customer2@gantian.test` | Catalog dan booking request |
+| Customer | `customer@gantian.test` | Catalog, My Bookings, booking request, dan review status booking |
+| Customer | `customer2@gantian.test` | Catalog, My Bookings, booking request, dan review status booking |
 
 ## Reviewer Workflow
 
@@ -108,6 +108,7 @@ Setelah login, gunakan route berikut untuk mengecek fitur utama:
 | --- | --- | --- |
 | Dashboard | `/dashboard` | Authenticated user |
 | Customer Catalog | `/catalog` | Customer |
+| Customer Bookings | `/bookings` | Customer |
 | Staff Bookings | `/staff/bookings` | Staff, Admin |
 | Admin Items | `/admin/items` | Admin |
 | Admin Reports | `/admin/reports` | Admin |
@@ -115,11 +116,28 @@ Setelah login, gunakan route berikut untuk mengecek fitur utama:
 Skenario uji manual yang disarankan:
 
 1. Login sebagai `customer@gantian.test`, buka `/catalog`, pilih item available, lalu submit booking request.
-2. Coba submit booking duplicate dengan item dan tanggal yang sama, lalu pastikan request ditolak.
-3. Login sebagai `staff@gantian.test`, buka `/staff/bookings`, approve pending booking, lanjutkan ke check-out dan check-in.
-4. Issue denda pada booking active atau completed.
-5. Login sebagai `admin@gantian.test`, kelola item di `/admin/items` dan cek laporan di `/admin/reports`.
-6. Pastikan customer tidak bisa membuka route staff/admin.
+2. Buka `/bookings` atau menu My Bookings, lalu verifikasi status dan riwayat booking dari seed data.
+3. Coba submit booking duplicate dengan item dan tanggal yang sama, lalu pastikan request ditolak.
+4. Login sebagai `staff@gantian.test`, buka `/staff/bookings`, approve pending booking, lanjutkan ke check-out dan check-in.
+5. Issue denda pada booking active atau completed.
+6. Login sebagai `admin@gantian.test`, kelola item di `/admin/items` dan cek laporan di `/admin/reports`.
+7. Pastikan customer tidak bisa membuka route staff/admin.
+
+## Proposal Alignment
+
+Baseline proposal yang dipakai untuk review berjudul **Sistem Manajemen Penyewaan Alat Terjadwal (Gantian)**.
+
+Pemetaan actor proposal ke role aplikasi:
+
+| Proposal | Role aplikasi |
+| --- | --- |
+| Customer | `customer` |
+| Staff/Frontdesk | `staff` |
+| Owner/Admin | `admin` |
+
+Scope yang sudah tercakup dalam codebase saat ini meliputi auth/RBAC, catalog, booking request, Customer Bookings, availability validation, staff lifecycle, inspections, fines, admin catalog, admin reports, dan tests. Catatan safety availability tetap mengikuti aturan domain: hanya booking `approved` dan `active` yang reserve stock, sedangkan `pending`, `completed`, dan `cancelled` tidak reserve stock.
+
+Scope berikut masih future scope dan tidak diklaim sebagai fitur final: payment gateway, payment settlement, dan report export.
 
 ## Quality Checks
 
@@ -156,4 +174,4 @@ Status booking:
 
 ## Catatan Batasan
 
-Payment settlement belum menjadi fitur final. Saat ini sistem sudah mendukung booking, lifecycle rental, fine assessment, dan reporting dasar. Phase berikutnya yang disarankan adalah hardening payment/transaction settlement atau export laporan admin.
+Payment settlement dan report export belum menjadi fitur final. Saat ini sistem sudah mendukung booking, lifecycle rental, fine assessment, dan reporting dasar. Phase berikutnya yang disarankan adalah demo/reviewer hardening, agar alur demo, data seed, dan dokumentasi reviewer tetap konsisten dengan scope yang sudah ada.
