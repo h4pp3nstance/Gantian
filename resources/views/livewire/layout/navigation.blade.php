@@ -36,6 +36,10 @@ new class extends Component
                         <x-nav-link :href="route('customer.catalog')" :active="request()->routeIs('customer.catalog')" wire:navigate>
                             {{ __('Catalog') }}
                         </x-nav-link>
+
+                        <x-nav-link :href="route('customer.bookings')" :active="request()->routeIs('customer.bookings')" wire:navigate>
+                            {{ __('My Bookings') }}
+                        </x-nav-link>
                     @endif
 
                     @if (auth()->user()->canActAs(\App\Models\User::ROLE_STAFF))
@@ -106,6 +110,10 @@ new class extends Component
             @if (auth()->user()->isCustomer())
                 <x-responsive-nav-link :href="route('customer.catalog')" :active="request()->routeIs('customer.catalog')" wire:navigate>
                     {{ __('Catalog') }}
+                </x-responsive-nav-link>
+
+                <x-responsive-nav-link :href="route('customer.bookings')" :active="request()->routeIs('customer.bookings')" wire:navigate>
+                    {{ __('My Bookings') }}
                 </x-responsive-nav-link>
             @endif
 

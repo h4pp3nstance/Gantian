@@ -18,6 +18,7 @@
         ];
 
         $actions[] = ['label' => 'Browse catalog', 'route' => route('customer.catalog')];
+        $actions[] = ['label' => 'My bookings', 'route' => route('customer.bookings')];
     }
 
     if ($user->canActAs(User::ROLE_STAFF)) {

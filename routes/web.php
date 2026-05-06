@@ -13,6 +13,10 @@ Route::middleware(['auth', 'verified'])->group(function (): void {
         ->middleware('role:customer')
         ->name('customer.catalog');
 
+    Volt::route('bookings', 'pages.customer.bookings')
+        ->middleware('role:customer')
+        ->name('customer.bookings');
+
     Route::prefix('staff')
         ->middleware('role:staff')
         ->name('staff.')
